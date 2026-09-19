@@ -1,3 +1,4 @@
 # IDk
-# what to do?
+# how to code?
 # ano gagawin natin?
+#:( lol
