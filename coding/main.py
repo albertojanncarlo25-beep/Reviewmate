@@ -1,10 +1,4 @@
-"""
-ReviewMate - single-file version.
-Everything (database setup, database functions, and the GUI) lives in
-this one file. Run with: python main.py
-The database file (reviewmate.db) is created automatically the first
-time you run this - no separate setup step needed.
-"""
+
 import sqlite3
 import os
 import tkinter as tk
@@ -14,7 +8,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reviewmate.d
 
 
 # ======================================================================
-# DATABASE SETUP  (this used to be database/db_setup.py)
+# DATABASE SETUP  
 # ======================================================================
 
 def create_tables():
@@ -58,7 +52,7 @@ def create_tables():
 
 
 # ======================================================================
-# DATABASE FUNCTIONS  (this used to be database/db_helper.py)
+# DATABASE FUNCTIONS  
 # ======================================================================
 
 def get_connection():
@@ -135,7 +129,7 @@ def get_attempts_by_subject(subject_id):
 
 
 # ======================================================================
-# GUI  (this used to be main.py's window classes)
+# GUI  
 # ======================================================================
 
 class ReviewMateApp(tk.Tk):
@@ -311,7 +305,6 @@ class ViewQuestionsWindow(tk.Toplevel):
 
 
 # ======================================================================
-# RUN THE APP
 # ======================================================================
 
 if __name__ == "__main__":
