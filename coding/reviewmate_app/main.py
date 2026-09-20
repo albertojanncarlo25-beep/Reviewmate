@@ -34,7 +34,7 @@ class AddSubjectWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Add Subject")
         self.geometry("300x160")
-        self.grab_set()  # keep focus on this window
+        self.grab_set()  
 
         tk.Label(self, text="Subject Name:").pack(pady=(20, 5))
         self.entry = ttk.Entry(self, width=25)
@@ -126,7 +126,7 @@ class ViewQuestionsWindow(tk.Toplevel):
         subject_menu.bind("<<ComboboxSelected>>", lambda e: self.refresh_list(self.subject_var.get()))
         subject_menu.pack(pady=5)
 
-        # Scrollable area built from a Canvas + inner Frame (plain Tkinter has no built-in scroll frame)
+        # Scrollable area built 
         container = tk.Frame(self)
         container.pack(pady=10, fill="both", expand=True, padx=10)
 
