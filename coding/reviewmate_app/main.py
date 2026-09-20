@@ -1,8 +1,130 @@
 
+import sqlite3
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
-from database import db_helper
 
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reviewmate.db")
+
+
+# DATABASE SETUP  
+
+def create_tables():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subjects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_id INTEGER NOT NULL,
+            question_text TEXT NOT NULL,
+            choice_a TEXT NOT NULL,
+            choice_b TEXT NOT NULL,
+            choice_c TEXT NOT NULL,
+            choice_d TEXT NOT NULL,
+            correct_answer TEXT NOT NULL,
+            FOREIGN KEY (subject_id) REFERENCES subjects (id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS quiz_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_id INTEGER NOT NULL,
+            score INTEGER NOT NULL,
+            total_questions INTEGER NOT NULL,
+            date_taken TEXT NOT NULL,
+            FOREIGN KEY (subject_id) REFERENCES subjects (id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# DATABASE FUNCTIONS  
+
+def get_connection():
+    return sqlite3.connect(DB_PATH)
+
+
+def add_subject(name):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO subjects (name) VALUES (?)", (name,))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        pass 
+    conn.close()
+
+
+def get_subjects():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM subjects ORDER BY name")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def add_question(subject_id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO questions
+            (subject_id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (subject_id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer))
+    conn.commit()
+    conn.close()
+
+
+def get_questions_by_subject(subject_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM questions WHERE subject_id = ?", (subject_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_question(question_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM questions WHERE id = ?", (question_id,))
+    conn.commit()
+    conn.close()
+
+
+def save_attempt(subject_id, score, total_questions, date_taken):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO quiz_attempts (subject_id, score, total_questions, date_taken)
+        VALUES (?, ?, ?, ?)
+    """, (subject_id, score, total_questions, date_taken))
+    conn.commit()
+    conn.close()
+
+
+def get_attempts_by_subject(subject_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM quiz_attempts WHERE subject_id = ? ORDER BY date_taken DESC", (subject_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+# GUI  
 
 class ReviewMateApp(tk.Tk):
     def __init__(self):
@@ -34,7 +156,7 @@ class AddSubjectWindow(tk.Toplevel):
         super().__init__(master)
         self.title("Add Subject")
         self.geometry("300x160")
-        self.grab_set()  
+        self.grab_set()
 
         tk.Label(self, text="Subject Name:").pack(pady=(20, 5))
         self.entry = ttk.Entry(self, width=25)
@@ -47,7 +169,7 @@ class AddSubjectWindow(tk.Toplevel):
         if not name:
             messagebox.showwarning("Missing info", "Please enter a subject name.")
             return
-        db_helper.add_subject(name)
+        add_subject(name)
         messagebox.showinfo("Saved", f"Subject '{name}' added.")
         self.destroy()
 
@@ -59,16 +181,15 @@ class AddQuestionWindow(tk.Toplevel):
         self.geometry("400x520")
         self.grab_set()
 
-        subjects = db_helper.get_subjects()
+        subjects = get_subjects()
         self.subject_map = {name: sid for sid, name in subjects}
         subject_names = list(self.subject_map.keys())
 
         tk.Label(self, text="Subject:").pack(pady=(15, 5))
         self.subject_var = tk.StringVar(value=subject_names[0] if subject_names else "")
-        subject_menu = ttk.Combobox(self, textvariable=self.subject_var,
-                                     values=subject_names or ["Add a subject first"],
-                                     state="readonly", width=30)
-        subject_menu.pack(pady=5)
+        ttk.Combobox(self, textvariable=self.subject_var,
+                     values=subject_names or ["Add a subject first"],
+                     state="readonly", width=30).pack(pady=5)
 
         tk.Label(self, text="Question:").pack(pady=(15, 5))
         self.question_entry = ttk.Entry(self, width=45)
@@ -101,8 +222,8 @@ class AddQuestionWindow(tk.Toplevel):
             messagebox.showwarning("Missing info", "Please fill in all fields, and set correct answer to A, B, C, or D.")
             return
 
-        db_helper.add_question(subject_id, question_text,
-                                choices["A"], choices["B"], choices["C"], choices["D"], correct)
+        add_question(subject_id, question_text,
+                      choices["A"], choices["B"], choices["C"], choices["D"], correct)
         messagebox.showinfo("Saved", "Question added successfully.")
         self.destroy()
 
@@ -114,7 +235,7 @@ class ViewQuestionsWindow(tk.Toplevel):
         self.geometry("450x420")
         self.grab_set()
 
-        subjects = db_helper.get_subjects()
+        subjects = get_subjects()
         self.subject_map = {name: sid for sid, name in subjects}
         subject_names = list(self.subject_map.keys())
 
@@ -126,7 +247,6 @@ class ViewQuestionsWindow(tk.Toplevel):
         subject_menu.bind("<<ComboboxSelected>>", lambda e: self.refresh_list(self.subject_var.get()))
         subject_menu.pack(pady=5)
 
-        # Scrollable area built 
         container = tk.Frame(self)
         container.pack(pady=10, fill="both", expand=True, padx=10)
 
@@ -154,20 +274,32 @@ class ViewQuestionsWindow(tk.Toplevel):
         if not subject_id:
             return
 
-        questions = db_helper.get_questions_by_subject(subject_id)
+        questions = get_questions_by_subject(subject_id)
         if not questions:
             tk.Label(self.list_frame, text="No questions yet for this subject.").pack(pady=10)
             return
 
         for q in questions:
+            row = tk.Frame(self.list_frame, relief="groove", bd=1)
+            row.pack(pady=4, padx=4, fill="x")
+
             text = (f"Q: {q[2]}\n"
                     f"A) {q[3]}   B) {q[4]}   C) {q[5]}   D) {q[6]}\n"
                     f"Correct: {q[7]}")
-            tk.Label(self.list_frame, text=text, justify="left", anchor="w",
-                     wraplength=370, padx=10, pady=8, relief="groove", bd=1).pack(
-                pady=4, padx=4, fill="x")
+            tk.Label(row, text=text, justify="left", anchor="w",
+                     wraplength=320, padx=10, pady=8).pack(side="left", fill="x", expand=True)
 
+            ttk.Button(row, text="Delete", command=lambda qid=q[0]: self.delete_question(qid)).pack(
+                side="right", padx=8)
+
+    def delete_question(self, question_id):
+        if messagebox.askyesno("Confirm", "Delete this question?"):
+            delete_question(question_id)
+            self.refresh_list(self.subject_var.get())
+
+# RUN THE APP
 
 if __name__ == "__main__":
+    create_tables()  # makes sure reviewmate.db and its tables exist
     app = ReviewMateApp()
     app.mainloop()
