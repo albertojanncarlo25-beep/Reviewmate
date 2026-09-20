@@ -6,7 +6,6 @@ from tkinter import ttk, messagebox
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reviewmate.db")
 
-
 # DATABASE SETUP  
 
 def create_tables():
@@ -47,7 +46,6 @@ def create_tables():
 
     conn.commit()
     conn.close()
-
 
 # DATABASE FUNCTIONS  
 
@@ -122,7 +120,6 @@ def get_attempts_by_subject(subject_id):
     rows = cursor.fetchall()
     conn.close()
     return rows
-
 
 # GUI  
 
