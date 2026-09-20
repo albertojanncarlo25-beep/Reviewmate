@@ -221,7 +221,7 @@ elif page == "Take Quiz":
             answers = {}
             with st.form("quiz_form"):
                 for i, q in enumerate(questions):
-                    # q = (id, subject_id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer)
+                    # A,B,C
                     st.markdown(f"**{i + 1}. {q[2]}**")
                     choice_labels = {"A": q[3], "B": q[4], "C": q[5], "D": q[6]}
                     choice = st.radio(
@@ -275,7 +275,9 @@ elif page == "Review History":
             st.info("No quiz attempts yet for this subject.")
         else:
             for a in attempts:
-                # a = (id, subject_id, score, total_questions, date_taken)
                 with st.container(border=True):
                     st.write(f"**Score:** {a[2]} / {a[3]}")
                     st.caption(f"Taken on {a[4]}")
+
+
+
