@@ -5,10 +5,7 @@ from tkinter import ttk, messagebox
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reviewmate.db")
 
-
-# ======================================================================
 # DATABASE SETUP  
-# ======================================================================
 
 def create_tables():
     conn = sqlite3.connect(DB_PATH)
@@ -49,10 +46,7 @@ def create_tables():
     conn.commit()
     conn.close()
 
-
-# ======================================================================
 # DATABASE FUNCTIONS  
-# ======================================================================
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
@@ -65,7 +59,7 @@ def add_subject(name):
         cursor.execute("INSERT INTO subjects (name) VALUES (?)", (name,))
         conn.commit()
     except sqlite3.IntegrityError:
-        pass  # subject already exists
+        pass 
     conn.close()
 
 
@@ -126,10 +120,7 @@ def get_attempts_by_subject(subject_id):
     conn.close()
     return rows
 
-
-# ======================================================================
 # GUI  
-# ======================================================================
 
 class ReviewMateApp(tk.Tk):
     def __init__(self):
@@ -302,11 +293,9 @@ class ViewQuestionsWindow(tk.Toplevel):
             delete_question(question_id)
             self.refresh_list(self.subject_var.get())
 
-
-# ======================================================================
-# ======================================================================
+# RUN THE APP
 
 if __name__ == "__main__":
-    create_tables()  # makes sure reviewmate.db and its tables exist
+    create_tables()  
     app = ReviewMateApp()
     app.mainloop()
