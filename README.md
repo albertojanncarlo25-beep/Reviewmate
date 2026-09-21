@@ -1,3 +1,1 @@
-# IDk
-# how to code?
-# ano gagawin natin?
+print ("hello world")
