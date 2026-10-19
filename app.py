@@ -1,4 +1,3 @@
-
 import streamlit as st
 import sqlite3
 from datetime import datetime
@@ -30,6 +29,16 @@ def create_tables():
             option_c TEXT NOT NULL,
             option_d TEXT NOT NULL,
             correct_answer TEXT NOT NULL
+        )
+    """)
+
+    # Users table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL
         )
     """)
 
@@ -65,10 +74,86 @@ def create_tables():
 
 create_tables()
 
+# Migration for older ReviewMate databases.
+conn = get_connection()
+cursor = conn.cursor()
+try:
+    cursor.execute("ALTER TABLE attempts ADD COLUMN username TEXT")
+except sqlite3.OperationalError:
+    pass
+
+# New: question type (Multiple Choice, Identification, Enumeration)
+try:
+    cursor.execute(
+        "ALTER TABLE questions ADD COLUMN question_type TEXT DEFAULT 'Multiple Choice'"
+    )
+except sqlite3.OperationalError:
+    pass
+conn.commit()
+conn.close()
+
 
 # =========================================================
 # DATABASE FUNCTIONS
 # =========================================================
+
+def register_or_update_user(username):
+    username = username.strip()
+    if not username:
+        return
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT id FROM users WHERE username = ?",
+        (username,)
+    )
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.execute(
+            "UPDATE users SET last_seen = ? WHERE username = ?",
+            (now, username)
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO users (username, first_seen, last_seen)
+            VALUES (?, ?, ?)
+            """,
+            (username, now, now)
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def get_users():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT username, first_seen, last_seen
+        FROM users
+        ORDER BY last_seen DESC
+    """)
+
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+
+def get_user_count():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
 
 def add_question(
     subject,
@@ -78,7 +163,8 @@ def add_question(
     option_b,
     option_c,
     option_d,
-    correct_answer
+    correct_answer,
+    question_type="Multiple Choice"
 ):
     conn = get_connection()
     cursor = conn.cursor()
@@ -92,9 +178,10 @@ def add_question(
             option_b,
             option_c,
             option_d,
-            correct_answer
+            correct_answer,
+            question_type
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         subject,
         quiz_name,
@@ -103,7 +190,8 @@ def add_question(
         option_b,
         option_c,
         option_d,
-        correct_answer
+        correct_answer,
+        question_type
     ))
 
     conn.commit()
@@ -164,7 +252,8 @@ def get_questions(subject, quiz_name):
             option_b,
             option_c,
             option_d,
-            correct_answer
+            correct_answer,
+            COALESCE(question_type, 'Multiple Choice')
         FROM questions
         WHERE subject = ?
         AND quiz_name = ?
@@ -192,7 +281,8 @@ def get_all_questions():
             option_b,
             option_c,
             option_d,
-            correct_answer
+            correct_answer,
+            COALESCE(question_type, 'Multiple Choice')
         FROM questions
         ORDER BY subject, quiz_name, id
     """)
@@ -223,7 +313,8 @@ def save_attempt(
     score,
     total,
     percentage,
-    answers
+    answers,
+    username
 ):
     conn = get_connection()
     cursor = conn.cursor()
@@ -237,16 +328,18 @@ def save_attempt(
             score,
             total,
             percentage,
-            date_taken
+            date_taken,
+            username
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
         subject,
         quiz_name,
         score,
         total,
         percentage,
-        date_taken
+        date_taken,
+        username
     ))
 
     attempt_id = cursor.lastrowid
@@ -266,7 +359,7 @@ def save_attempt(
             answer["question"],
             answer["selected"],
             answer["correct"],
-            answer["correct"] == answer["selected"]
+            answer["is_correct"]
         ))
 
     conn.commit()
@@ -287,7 +380,8 @@ def get_attempts():
             score,
             total,
             percentage,
-            date_taken
+            date_taken,
+            COALESCE(username, 'Unknown User')
         FROM attempts
         ORDER BY id DESC
     """)
@@ -318,6 +412,39 @@ def get_attempt_answers(attempt_id):
     conn.close()
 
     return answers
+
+
+# =========================================================
+# ANSWER CHECKING HELPERS
+# =========================================================
+
+def get_lines(text):
+    # Turns "HTML\nCSS\n\nJS" into ["HTML", "CSS", "JS"]
+    lines = []
+
+    for line in str(text).split("\n"):
+        if line.strip() != "":
+            lines.append(line.strip())
+
+    return lines
+
+
+def lines_to_text(text):
+    # Turns "HTML\nCSS" into "HTML, CSS" so it shows on one line
+    return ", ".join(get_lines(text))
+
+
+def check_identification(selected, correct):
+    # Ignores capital letters and extra spaces
+    return selected.strip().lower() == correct.strip().lower()
+
+
+def check_enumeration(selected, correct):
+    # All items must be correct. The order does not matter.
+    selected_items = sorted([item.lower() for item in get_lines(selected)])
+    correct_items = sorted([item.lower() for item in get_lines(correct)])
+
+    return selected_items == correct_items
 
 
 # =========================================================
@@ -392,6 +519,49 @@ if "quiz_name" not in st.session_state:
 if "last_attempt_id" not in st.session_state:
     st.session_state.last_attempt_id = None
 
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+
+
+# =========================================================
+# USER LOGIN
+# =========================================================
+
+if st.session_state.current_user is None:
+
+    st.title("📚 Welcome to ReviewMate")
+    st.write("Enter your name to open ReviewMate.")
+
+    with st.form("user_login_form"):
+
+        username = st.text_input(
+            "Your Name",
+            placeholder="Example: Gian Andrae Edu"
+        )
+
+        login = st.form_submit_button(
+            "🚀 Open ReviewMate",
+            use_container_width=True
+        )
+
+        if login:
+
+            if not username.strip():
+                st.error("Please enter your name.")
+
+            else:
+                st.session_state.current_user = username.strip()
+                register_or_update_user(
+                    st.session_state.current_user
+                )
+                st.rerun()
+
+    st.info(
+        "Your name will appear in the Users list."
+    )
+
+    st.stop()
+
 
 # =========================================================
 # SIDEBAR
@@ -401,6 +571,14 @@ st.sidebar.title("📚 ReviewMate")
 
 st.sidebar.write("Student Reviewer and Quiz Management System")
 
+st.sidebar.success(
+    f"👤 Logged in as: {st.session_state.current_user}"
+)
+
+register_or_update_user(
+    st.session_state.current_user
+)
+
 page = st.sidebar.radio(
     "Navigation",
     [
@@ -408,9 +586,19 @@ page = st.sidebar.radio(
         "📝 Take Quiz",
         "➕ Create Question",
         "📋 Question Sets",
-        "📊 Quiz History"
+        "📊 Quiz History",
+        "👥 Users"
     ]
 )
+
+if st.sidebar.button("🚪 Change User", use_container_width=True):
+
+    st.session_state.current_user = None
+    st.session_state.quiz_started = False
+    st.session_state.quiz_submitted = False
+    st.session_state.last_attempt_id = None
+
+    st.rerun()
 
 
 # =========================================================
@@ -434,7 +622,7 @@ if page == "🏠 Dashboard":
     subjects = get_subjects()
     quizzes = get_quizzes()
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.metric(
@@ -460,6 +648,12 @@ if page == "🏠 Dashboard":
             len(attempts)
         )
 
+    with col5:
+        st.metric(
+            "👥 Users",
+            get_user_count()
+        )
+
     st.divider()
 
     st.subheader("Welcome to ReviewMate!")
@@ -482,10 +676,11 @@ if page == "🏠 Dashboard":
 
         for attempt in recent_attempts:
 
-            attempt_id, subject, quiz_name, score, total, percentage, date_taken = attempt
+            attempt_id, subject, quiz_name, score, total, percentage, date_taken, username = attempt
 
             st.write(
                 f"**{quiz_name}** - {subject} | "
+                f"👤 **{username}** | "
                 f"Score: **{score}/{total}** "
                 f"({percentage:.1f}%) | {date_taken}"
             )
@@ -597,17 +792,42 @@ elif page == "📝 Take Quiz":
 
                     st.write(question_text)
 
-                    st.radio(
-                        "Choose your answer:",
-                        [
-                            option_a,
-                            option_b,
-                            option_c,
-                            option_d
-                        ],
-                        key=f"answer_{question_id}",
-                        index=None
-                    )
+                    question_type = q[7]
+
+                    if question_type == "Identification":
+
+                        st.text_input(
+                            "Type your answer:",
+                            key=f"answer_{question_id}"
+                        )
+
+                    elif question_type == "Enumeration":
+
+                        # q[6] holds the correct answers for this type
+                        item_count = len(get_lines(q[6]))
+
+                        st.caption(
+                            f"Enumerate {item_count} answers."
+                        )
+
+                        st.text_area(
+                            "Type one answer per line:",
+                            key=f"answer_{question_id}"
+                        )
+
+                    else:
+
+                        st.radio(
+                            "Choose your answer:",
+                            [
+                                option_a,
+                                option_b,
+                                option_c,
+                                option_d
+                            ],
+                            key=f"answer_{question_id}",
+                            index=None
+                        )
 
                     st.divider()
 
@@ -626,7 +846,7 @@ elif page == "📝 Take Quiz":
                             f"answer_{question_id}"
                         )
 
-                        if answer is None:
+                        if answer is None or str(answer).strip() == "":
                             unanswered.append(question_id)
 
                     if unanswered:
@@ -652,25 +872,56 @@ elif page == "📝 Take Quiz":
 
                             correct_letter = q[6]
 
-                            options = {
-                                "A": option_a,
-                                "B": option_b,
-                                "C": option_c,
-                                "D": option_d
-                            }
+                            question_type = q[7]
 
                             selected_answer = st.session_state.get(
                                 f"answer_{question_id}"
                             )
 
-                            correct_answer = options[
-                                correct_letter
-                            ]
+                            # For Identification and Enumeration,
+                            # correct_letter is the real answer text.
+                            if question_type == "Identification":
 
-                            is_correct = (
-                                selected_answer
-                                == correct_answer
-                            )
+                                correct_answer = correct_letter
+
+                                is_correct = check_identification(
+                                    selected_answer,
+                                    correct_answer
+                                )
+
+                            elif question_type == "Enumeration":
+
+                                is_correct = check_enumeration(
+                                    selected_answer,
+                                    correct_letter
+                                )
+
+                                # Show the answers on one line
+                                selected_answer = lines_to_text(
+                                    selected_answer
+                                )
+
+                                correct_answer = lines_to_text(
+                                    correct_letter
+                                )
+
+                            else:
+
+                                options = {
+                                    "A": option_a,
+                                    "B": option_b,
+                                    "C": option_c,
+                                    "D": option_d
+                                }
+
+                                correct_answer = options[
+                                    correct_letter
+                                ]
+
+                                is_correct = (
+                                    selected_answer
+                                    == correct_answer
+                                )
 
                             if is_correct:
                                 score += 1
@@ -678,7 +929,8 @@ elif page == "📝 Take Quiz":
                             answers.append({
                                 "question": question_text,
                                 "selected": selected_answer,
-                                "correct": correct_answer
+                                "correct": correct_answer,
+                                "is_correct": is_correct
                             })
 
                         total = len(
@@ -695,7 +947,8 @@ elif page == "📝 Take Quiz":
                             score,
                             total,
                             percentage,
-                            answers
+                            answers,
+                            st.session_state.current_user
                         )
 
                         st.session_state.last_attempt_id = attempt_id
@@ -742,7 +995,8 @@ if (
             score,
             total,
             percentage,
-            date_taken
+            date_taken,
+            username
         ) = current_attempt
 
         st.metric(
@@ -753,6 +1007,10 @@ if (
         st.metric(
             "Percentage",
             f"{percentage:.1f}%"
+        )
+
+        st.write(
+            f"👤 **Taken by:** {username}"
         )
 
         if percentage >= 90:
@@ -829,7 +1087,13 @@ elif page == "➕ Create Question":
     st.title("➕ Create Question")
 
     st.write(
-        "Create a multiple-choice question for your quiz."
+        "Create a question for your quiz."
+    )
+
+    # This is outside the form so the form changes right away
+    question_type = st.selectbox(
+        "Question Type",
+        ["Multiple Choice", "Identification", "Enumeration"]
     )
 
     with st.form("create_question_form"):
@@ -849,32 +1113,55 @@ elif page == "➕ Create Question":
             placeholder="Enter your question here..."
         )
 
-        col1, col2 = st.columns(2)
+        # Only Multiple Choice uses the four options
+        option_a = ""
+        option_b = ""
+        option_c = ""
+        option_d = ""
+        correct_answer = ""
 
-        with col1:
+        if question_type == "Multiple Choice":
 
-            option_a = st.text_input(
-                "Option A"
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                option_a = st.text_input(
+                    "Option A"
+                )
+
+                option_b = st.text_input(
+                    "Option B"
+                )
+
+            with col2:
+
+                option_c = st.text_input(
+                    "Option C"
+                )
+
+                option_d = st.text_input(
+                    "Option D"
+                )
+
+            correct_answer = st.selectbox(
+                "Correct Answer",
+                ["A", "B", "C", "D"]
             )
 
-            option_b = st.text_input(
-                "Option B"
+        elif question_type == "Identification":
+
+            correct_answer = st.text_input(
+                "Correct Answer",
+                placeholder="Example: Python"
             )
 
-        with col2:
+        else:
 
-            option_c = st.text_input(
-                "Option C"
+            correct_answer = st.text_area(
+                "Correct Answers (one per line)",
+                placeholder="Example:\nHTML\nCSS\nJavaScript"
             )
-
-            option_d = st.text_input(
-                "Option D"
-            )
-
-        correct_answer = st.selectbox(
-            "Correct Answer",
-            ["A", "B", "C", "D"]
-        )
 
         submitted = st.form_submit_button(
             "💾 Save Question",
@@ -901,7 +1188,7 @@ elif page == "➕ Create Question":
                     "Please enter a question."
                 )
 
-            elif not all([
+            elif question_type == "Multiple Choice" and not all([
                 option_a.strip(),
                 option_b.strip(),
                 option_c.strip(),
@@ -912,7 +1199,30 @@ elif page == "➕ Create Question":
                     "Please fill in all four choices."
                 )
 
+            elif (
+                question_type == "Identification"
+                and not correct_answer.strip()
+            ):
+
+                st.error(
+                    "Please enter the correct answer."
+                )
+
+            elif (
+                question_type == "Enumeration"
+                and len(get_lines(correct_answer)) < 2
+            ):
+
+                st.error(
+                    "Please enter at least 2 correct answers, one per line."
+                )
+
             else:
+
+                if question_type == "Enumeration":
+                    correct_answer = "\n".join(
+                        get_lines(correct_answer)
+                    )
 
                 add_question(
                     subject.strip(),
@@ -922,7 +1232,8 @@ elif page == "➕ Create Question":
                     option_b.strip(),
                     option_c.strip(),
                     option_d.strip(),
-                    correct_answer
+                    correct_answer.strip(),
+                    question_type
                 )
 
                 st.success(
@@ -966,64 +1277,202 @@ elif page == "📋 Question Sets":
                 if q[1] == selected_subject
             ]
 
-        st.write(
-            f"Showing **{len(filtered_questions)}** question(s)."
-        )
+        # Group questions with the same Subject + Quiz Name
+        # into one folder.
+        quiz_folders = {}
 
         for q in filtered_questions:
 
-            (
-                question_id,
-                subject,
-                quiz_name,
-                question,
-                option_a,
-                option_b,
-                option_c,
-                option_d,
-                correct_answer
-            ) = q
+            subject = q[1]
+            quiz_name = q[2]
+
+            folder_key = (subject, quiz_name)
+
+            if folder_key not in quiz_folders:
+                quiz_folders[folder_key] = []
+
+            quiz_folders[folder_key].append(q)
+
+        st.write(
+            f"Showing **{len(quiz_folders)}** quiz folder(s) "
+            f"containing **{len(filtered_questions)}** question(s)."
+        )
+
+        for (subject, quiz_name), quiz_questions in quiz_folders.items():
 
             with st.expander(
-                f"📚 {subject} | {quiz_name} | Question #{question_id}"
+                f"📁 {quiz_name} — {subject} "
+                f"({len(quiz_questions)} questions)",
+                expanded=False
+            ):
+
+                st.subheader(f"📚 {quiz_name}")
+
+                st.caption(
+                    f"Subject: {subject} | "
+                    f"{len(quiz_questions)} question(s)"
+                )
+
+                for q in quiz_questions:
+
+                    (
+                        question_id,
+                        subject,
+                        quiz_name,
+                        question,
+                        option_a,
+                        option_b,
+                        option_c,
+                        option_d,
+                        correct_answer,
+                        question_type
+                    ) = q
+
+                    st.write(
+                        f"### Question #{question_id}"
+                    )
+
+                    st.caption(f"Type: {question_type}")
+
+                    st.write(
+                        f"**Question:** {question}"
+                    )
+
+                    if question_type == "Multiple Choice":
+
+                        st.write(f"A. {option_a}")
+                        st.write(f"B. {option_b}")
+                        st.write(f"C. {option_c}")
+                        st.write(f"D. {option_d}")
+
+                        st.success(
+                            f"Correct Answer: {correct_answer}"
+                        )
+
+                    else:
+
+                        st.success(
+                            f"Correct Answer: {lines_to_text(correct_answer)}"
+                        )
+
+                    if st.button(
+                        "🗑️ Delete Question",
+                        key=f"delete_{question_id}"
+                    ):
+
+                        delete_question(question_id)
+
+                        st.success(
+                            "Question deleted."
+                        )
+
+                        st.rerun()
+
+                    st.divider()
+
+
+# =========================================================
+# USERS
+# =========================================================
+
+elif page == "👥 Users":
+
+    st.title("👥 Users")
+
+    users = get_users()
+
+    st.write(
+        f"Total people who have opened ReviewMate: **{len(users)}**"
+    )
+
+    if not users:
+
+        st.info("No users have opened ReviewMate yet.")
+
+    else:
+
+        st.subheader("📋 User List")
+
+        now = datetime.now()
+
+        for username, first_seen, last_seen in users:
+
+            try:
+                last_seen_dt = datetime.strptime(
+                    last_seen,
+                    "%Y-%m-%d %H:%M:%S"
+                )
+
+                minutes_ago = (
+                    now - last_seen_dt
+                ).total_seconds() / 60
+
+                is_active = minutes_ago <= 5
+
+            except ValueError:
+
+                is_active = False
+
+            status = (
+                "🟢 Active"
+                if is_active
+                else "⚪ Offline"
+            )
+
+            with st.container(border=True):
+
+                col1, col2, col3 = st.columns([2, 1, 2])
+
+                with col1:
+                    st.write(f"### 👤 {username}")
+
+                with col2:
+                    st.write(f"**{status}**")
+
+                with col3:
+                    st.write(f"Last active: {last_seen}")
+
+                st.caption(
+                    f"First opened: {first_seen}"
+                )
+
+        st.divider()
+
+        st.subheader("📊 Quiz Activity by User")
+
+        attempts = get_attempts()
+
+        if attempts:
+
+            user_attempts = {}
+
+            for attempt in attempts:
+
+                attempt_username = attempt[7]
+
+                user_attempts[attempt_username] = (
+                    user_attempts.get(
+                        attempt_username,
+                        0
+                    ) + 1
+                )
+
+            for username, count in sorted(
+                user_attempts.items(),
+                key=lambda item: item[1],
+                reverse=True
             ):
 
                 st.write(
-                    f"**Question:** {question}"
+                    f"👤 **{username}** — "
+                    f"{count} quiz attempt(s)"
                 )
 
-                st.write(
-                    f"A. {option_a}"
-                )
+        else:
 
-                st.write(
-                    f"B. {option_b}"
-                )
-
-                st.write(
-                    f"C. {option_c}"
-                )
-
-                st.write(
-                    f"D. {option_d}"
-                )
-
-                st.success(
-                    f"Correct Answer: {correct_answer}"
-                )
-
-                if st.button(
-                    "🗑️ Delete Question",
-                    key=f"delete_{question_id}"
-                ):
-
-                    delete_question(question_id)
-
-                    st.success(
-                        "Question deleted."
-                    )
-
-                    st.rerun()
+            st.info(
+                "No quiz attempts have been recorded yet."
+            )
 
 
 # =========================================================
@@ -1055,13 +1504,19 @@ elif page == "📊 Quiz History":
                 score,
                 total,
                 percentage,
-                date_taken
+                date_taken,
+                username
             ) = attempt
 
             with st.expander(
                 f"{quiz_name} | {subject} | "
+                f"👤 {username} | "
                 f"{score}/{total} ({percentage:.1f}%)"
             ):
+
+                st.write(
+                    f"**User:** {username}"
+                )
 
                 st.write(
                     f"**Subject:** {subject}"
