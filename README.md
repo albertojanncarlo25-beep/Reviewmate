@@ -50,3 +50,8 @@ quizzes, get their scores automatically, and review their past attempts.
 5. Check **Quiz History** and **Users** anytime.
 
 ## 📁 Project Structure
+ReviewMate/
+├── app.py            # Main application
+├── requirements.txt  # Dependencies
+├── reviewmate.db     # SQLite database (auto-created)
+└── README.md
