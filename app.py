@@ -1,5 +1,7 @@
 import streamlit as st
 import sqlite3
+import re
+import random
 from datetime import datetime
 
 # =========================================================
@@ -418,6 +420,11 @@ def get_attempt_answers(attempt_id):
 # ANSWER CHECKING HELPERS
 # =========================================================
 
+def is_clean_text(text):
+    # Only letters, numbers, spaces, and the symbols ? , .
+    return re.fullmatch(r"[A-Za-z0-9 ?,.\s]+", text) is not None
+
+
 def get_lines(text):
     # Turns "HTML\nCSS\n\nJS" into ["HTML", "CSS", "JS"]
     lines = []
@@ -483,6 +490,38 @@ st.markdown("""
     margin-bottom: 15px;
 }
 
+.stat-card {
+    padding: 25px 10px;
+    border-radius: 14px;
+    text-align: center;
+    margin-bottom: 15px;
+    color: white;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+.stat-icon {
+    font-size: 30px;
+}
+
+.stat-number {
+    font-size: 38px;
+    font-weight: bold;
+    line-height: 1.2;
+    color: white;
+}
+
+.stat-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: white;
+}
+
+.bg-blue   { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.bg-green  { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.bg-orange { background: linear-gradient(135deg, #f97316, #ea580c); }
+.bg-red    { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.bg-purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+
 .correct {
     padding: 10px;
     border-radius: 8px;
@@ -529,36 +568,97 @@ if "current_user" not in st.session_state:
 
 if st.session_state.current_user is None:
 
-    st.title("📚 Welcome to ReviewMate")
-    st.write("Enter your name to open ReviewMate.")
+    # Login page styling (only applies while logged out)
+    st.markdown("""
+    <style>
+    .login-title {
+        text-align: center;
+        font-size: 46px;
+        font-weight: bold;
+        color: inherit;
+        margin-top: 60px;
+        margin-bottom: 30px;
+    }
 
-    with st.form("user_login_form"):
+    /* Rounded input bar */
+    div[data-baseweb="input"],
+    div[data-baseweb="base-input"] {
+        border-radius: 30px !important;
+    }
 
-        username = st.text_input(
-            "Your Name",
-            placeholder="Example: Gian Andrae Edu"
+    div[data-baseweb="input"] {
+        border: 1px solid #aaa !important;
+        padding: 4px 12px;
+    }
+
+    div[data-baseweb="input"] input {
+        text-align: center;
+    }
+
+    /* Rounded blue Login bar */
+    .stFormSubmitButton button {
+        border-radius: 30px !important;
+        background-color: #dc2626 !important;
+        border: none !important;
+        color: white !important;
+        height: 48px;
+        font-size: 17px;
+    }
+
+    .stFormSubmitButton button:hover {
+        background-color: #b91c1c !important;
+    }
+
+    /* Remove the form box border */
+    div[data-testid="stForm"] {
+        border: none !important;
+        padding: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    left, center, right = st.columns([1, 1.2, 1])
+
+    with center:
+
+        st.markdown(
+            '<div class="login-title">ReviewMate</div>',
+            unsafe_allow_html=True
         )
 
-        login = st.form_submit_button(
-            "🚀 Open ReviewMate",
-            use_container_width=True
-        )
+        with st.form("user_login_form"):
 
-        if login:
+            username = st.text_input(
+                "Your Name",
+                placeholder="Your name",
+                max_chars=50,
+                label_visibility="collapsed"
+            )
 
-            if not username.strip():
-                st.error("Please enter your name.")
+            login = st.form_submit_button(
+                "Login",
+                use_container_width=True
+            )
 
-            else:
-                st.session_state.current_user = username.strip()
-                register_or_update_user(
-                    st.session_state.current_user
-                )
-                st.rerun()
+            if login:
 
-    st.info(
-        "Your name will appear in the Users list."
-    )
+                cleaned = username.strip()
+
+                if not cleaned:
+                    st.error("Please enter your name.")
+
+                elif not re.fullmatch(r"[A-Za-z0-9]+( [A-Za-z0-9]+)*", cleaned):
+                    st.error(
+                        "Use letters and numbers only. "
+                        "No special characters."
+                    )
+
+                else:
+                    st.session_state.current_user = cleaned
+                    register_or_update_user(
+                        st.session_state.current_user
+                    )
+                    st.rerun()
 
     st.stop()
 
@@ -622,37 +722,34 @@ if page == "🏠 Dashboard":
     subjects = get_subjects()
     quizzes = get_quizzes()
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        st.metric(
-            "📚 Subjects",
-            len(subjects)
+    def stat_card(icon, number, label, color):
+        st.markdown(
+            f"""
+            <div class="stat-card {color}">
+                <div class="stat-icon">{icon}</div>
+                <div class="stat-number">{number}</div>
+                <div class="stat-label">{label}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
-    with col2:
-        st.metric(
-            "📝 Quizzes",
-            len(quizzes)
-        )
+    cols = st.columns(5)
 
-    with col3:
-        st.metric(
-            "❓ Questions",
-            len(questions)
-        )
+    with cols[0]:
+        stat_card("📚", len(subjects), "Subjects", "bg-blue")
 
-    with col4:
-        st.metric(
-            "📊 Attempts",
-            len(attempts)
-        )
+    with cols[1]:
+        stat_card("📝", len(quizzes), "Quizzes", "bg-green")
 
-    with col5:
-        st.metric(
-            "👥 Users",
-            get_user_count()
-        )
+    with cols[2]:
+        stat_card("❓", len(questions), "Questions", "bg-orange")
+
+    with cols[3]:
+        stat_card("📊", len(attempts), "Attempts", "bg-red")
+
+    with cols[4]:
+        stat_card("👥", get_user_count(), "Users", "bg-purple")
 
     st.divider()
 
@@ -742,7 +839,10 @@ elif page == "📝 Take Quiz":
 
                     st.session_state.quiz_started = True
                     st.session_state.quiz_submitted = False
-                    st.session_state.quiz_questions = questions
+                    # Shuffle the questions once when the quiz starts
+                    shuffled_questions = list(questions)
+                    random.shuffle(shuffled_questions)
+                    st.session_state.quiz_questions = shuffled_questions
                     st.session_state.quiz_subject = selected_subject
                     st.session_state.quiz_name = selected_quiz
 
@@ -1100,17 +1200,20 @@ elif page == "➕ Create Question":
 
         subject = st.text_input(
             "Subject",
-            placeholder="Example: Programming"
+            placeholder="Example: Programming",
+            max_chars=100
         )
 
         quiz_name = st.text_input(
             "Quiz Name",
-            placeholder="Example: Python Basics"
+            placeholder="Example: Python Basics",
+            max_chars=100
         )
 
         question = st.text_area(
             "Question",
-            placeholder="Enter your question here..."
+            placeholder="Enter your question here...",
+            max_chars=1000
         )
 
         # Only Multiple Choice uses the four options
@@ -1127,21 +1230,25 @@ elif page == "➕ Create Question":
             with col1:
 
                 option_a = st.text_input(
-                    "Option A"
+                    "Option A",
+                    max_chars=200
                 )
 
                 option_b = st.text_input(
-                    "Option B"
+                    "Option B",
+                    max_chars=200
                 )
 
             with col2:
 
                 option_c = st.text_input(
-                    "Option C"
+                    "Option C",
+                    max_chars=200
                 )
 
                 option_d = st.text_input(
-                    "Option D"
+                    "Option D",
+                    max_chars=200
                 )
 
             correct_answer = st.selectbox(
@@ -1153,14 +1260,16 @@ elif page == "➕ Create Question":
 
             correct_answer = st.text_input(
                 "Correct Answer",
-                placeholder="Example: Python"
+                placeholder="Example: Python",
+                max_chars=100
             )
 
         else:
 
             correct_answer = st.text_area(
                 "Correct Answers (one per line)",
-                placeholder="Example:\nHTML\nCSS\nJavaScript"
+                placeholder="Example:\nHTML\nCSS\nJavaScript",
+                max_chars=100
             )
 
         submitted = st.form_submit_button(
@@ -1186,6 +1295,42 @@ elif page == "➕ Create Question":
 
                 st.error(
                     "Please enter a question."
+                )
+
+            elif not re.fullmatch(r"[A-Za-z0-9\s?,.]+", subject.strip()):
+
+                st.error(
+                    "Subject: only letters, numbers, spaces and ? , . are allowed."
+                )
+
+            elif not re.fullmatch(r"[A-Za-z0-9\s?,.]+", quiz_name.strip()):
+
+                st.error(
+                    "Quiz Name: only letters, numbers, spaces and ? , . are allowed."
+                )
+
+            elif not re.fullmatch(r"[A-Za-z0-9\s?,.]+", question.strip()):
+
+                st.error(
+                    "Question: only letters, numbers, spaces and ? , . are allowed."
+                )
+
+            elif not is_clean_text(subject.strip()):
+
+                st.error(
+                    "Subject: only letters, numbers, and the symbols ? , . are allowed."
+                )
+
+            elif not is_clean_text(quiz_name.strip()):
+
+                st.error(
+                    "Quiz Name: only letters, numbers, and the symbols ? , . are allowed."
+                )
+
+            elif not is_clean_text(question.strip()):
+
+                st.error(
+                    "Question: only letters, numbers, and the symbols ? , . are allowed."
                 )
 
             elif question_type == "Multiple Choice" and not all([
@@ -1215,6 +1360,15 @@ elif page == "➕ Create Question":
 
                 st.error(
                     "Please enter at least 2 correct answers, one per line."
+                )
+
+            elif (
+                question_type in ("Identification", "Enumeration")
+                and not is_clean_text(correct_answer.strip())
+            ):
+
+                st.error(
+                    "Correct Answer: only letters, numbers, and the symbols ? , . are allowed."
                 )
 
             else:
